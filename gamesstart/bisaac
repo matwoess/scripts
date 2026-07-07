@@ -1,0 +1,4 @@
+#!/bin/bash
+BIPATH="/home/mathias/Games/bisaac"
+export LD_LIBRARY_PATH="lib64:$LD_LIBRARY_PATH"
+(cd "$BIPATH" && exec "./isaac.x64" "$@")

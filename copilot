@@ -1,0 +1,2 @@
+#!/usr/bin/env bash
+/home/mathias/node_modules/.bin/copilot --disable-builtin-mcps

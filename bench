@@ -1,0 +1,5 @@
+#!/bin/bash
+fullname=${PWD##*/}
+bench=${fullname%-*}
+variant=${fullname#*-}
+/usr/lib/jvm/java-17-openjdk/bin/java -jar ${bench}-${variant}.jar ${bench} -n 35 -t 4 2>&1 | tee ${bench}-${variant}.txt

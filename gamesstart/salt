@@ -1,0 +1,3 @@
+#!/bin/bash
+SNSPATH="/home/mathias/games/SnS"
+(cd "$SNSPATH" && exec "./start" "$@")

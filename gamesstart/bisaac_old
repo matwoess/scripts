@@ -1,0 +1,4 @@
+#!/bin/bash
+BIPATH="/home/mathias/games/The Binding of Isaac Rebirth"
+export LD_LIBRARY_PATH="lib64:$LD_LIBRARY_PATH"
+(cd "$BIPATH" && exec "./isaac.x64" "$@")

@@ -1,0 +1,4 @@
+#!/bin/bash
+SBPATH="/home/mathias/games/Songbringer"
+export LD_LIBRARY_PATH="/usr/lib/libcurl-gnutils.so.4:$LD_LIBRARY_PATH"
+(cd "$SBPATH" && exec "./linux/Songbringer" "$@")
