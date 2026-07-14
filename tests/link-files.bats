@@ -8,11 +8,11 @@ setup() {
 
 	# Set up a fake repository structure inside test_dir
 	repo_dir="$test_dir/repo"
-	mkdir -p "$repo_dir/bin" "$repo_dir/gamesstart" "$repo_dir/scripts"
+	mkdir -p "$repo_dir/bin" "$repo_dir/run" "$repo_dir/scripts"
 
 	# Create some dummy files in the repo
 	touch "$repo_dir/bin/dummy1" "$repo_dir/bin/dummy2"
-	touch "$repo_dir/gamesstart/game1"
+	touch "$repo_dir/run/game1"
 	touch "$repo_dir/scripts/script1"
 
 	# Copy the link-files.sh to the fake repo directory to run it from there
@@ -29,8 +29,8 @@ teardown() {
 	[[ $status -eq 0 ]]
 
 	# Check that symlinks were created
-	[[ -L "$HOME/bin/gamestart" ]]
-	[[ $(readlink "$HOME/bin/gamestart") == "$repo_dir/gamesstart" ]]
+	[[ -L "$HOME/bin/run" ]]
+	[[ $(readlink "$HOME/bin/run") == "$repo_dir/run" ]]
 
 	[[ -L "$HOME/bin/scripts" ]]
 	[[ $(readlink "$HOME/bin/scripts") == "$repo_dir/scripts" ]]

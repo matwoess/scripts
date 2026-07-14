@@ -11,7 +11,7 @@ if [[ $script_dir == "${BASH_SOURCE[0]}" ]]; then
 fi
 repo_dir=$(cd -- "$script_dir" && pwd)
 src_bin_dir="$repo_dir/bin"
-src_gamestart_dir="$repo_dir/gamesstart"
+src_run_dir="$repo_dir/run"
 src_scripts_dir="$repo_dir/scripts"
 
 target_bin_dir="$HOME/bin"
@@ -62,11 +62,11 @@ fi
 # 2. Collect expected symlinks
 declare -A expected_links
 
-# Link the gamestart directory (source is gamesstart)
-if [[ -d $src_gamestart_dir ]]; then
-	expected_links["$target_bin_dir/gamestart"]=$src_gamestart_dir
+# Link the run directory (source is run)
+if [[ -d $src_run_dir ]]; then
+	expected_links["$target_bin_dir/run"]=$src_run_dir
 else
-	log_error "Source directory gamesstart not found at $src_gamestart_dir"
+	log_error "Source directory run not found at $src_run_dir"
 fi
 
 # Link the scripts directory
