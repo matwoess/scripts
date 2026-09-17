@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+
+if [[ -z $1 ]]; then
+	echo 'Usage: gpaxe <pattern>' >&2
+	exit 1
+fi
+
+exec git log -S "$1" --oneline "${@:2}"
