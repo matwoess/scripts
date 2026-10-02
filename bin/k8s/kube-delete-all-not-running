@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+
+if [ "$#" -ne 1 ]; then
+	echo "Usage: $0 <NAMESPACE>"
+	exit 1
+fi
+
+
+NAMESPACE=$1
+
+kubectl delete pod --namespace ${NAMESPACE} --field-selector=status.phase!=Running
