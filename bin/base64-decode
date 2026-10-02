@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+
+if [ -z "$1" ]; then
+    echo "Error: No input provided. Please provide a base64 string to decode as first argument."
+    exit 1
+fi
+
+printf "$1" | base64 --decode

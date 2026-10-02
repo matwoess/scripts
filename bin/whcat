@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+
+if [ -z "$1" ]; then
+    echo "Error: Please provide the name of a script in the path as first argument."
+    exit 1
+fi
+
+cat $(which $1)
