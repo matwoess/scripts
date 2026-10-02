@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+#
+# git-analysis - Analyze codebase health, patterns, and risks using git history.
+#
+# Based on: https://piechowski.io/post/git-commands-before-reading-code/
+#
+
+set -o pipefail
+
+readonly SCRIPT_NAME="${0##*/}"
+
+die() {
+	printf '%s: error: %s\n' "$SCRIPT_NAME" "$*" >&2
+	exit 1
+}
+
+log() {
+	printf '%s\n' "$*" >&2
+}
+
+section() {
+	printf '%s\n' "$*" >&2
+}
+
+analyze_most_changed() {
+	section "1. WHAT CHANGES THE MOST"
+	log "Description: Top 20 most-changed files in the last year"
+	log "Signal: High churn + low ownership = technical debt risk"
+	log ""
+	git log --format=format: --name-only --since="1 year ago" | sort | uniq -c | sort -nr | head -20 >&2
+	log ""
+}
+
+analyze_contributors() {
+	section "2. WHO BUILT THIS"
+	log "Description: Contributors ranked by commit count"
+	log "Signal: Bus factor risk, team turnover patterns"
+	log ""
+	git shortlog -sn --no-merges >&2
+	log ""
+}
+
+analyze_recent_contributors() {
+	section "3. WHO BUILT THIS (Last 6 Months)"
+	log "Description: Active contributors in the last 6 months"
+	log "Signal: Identifies if original builders have left"
+	log ""
+	git shortlog -sn --no-merges --since="6 months ago" >&2
+	log ""
+}
+
+analyze_bug_clusters() {
+	section "4. WHERE DO BUGS CLUSTER"
+	log "Description: Top 20 files with bug-related commits"
+	log "Signal: High-risk code that keeps breaking and getting patched"
+	log ""
+	git log -i -E --grep="fix|bug|broken" --name-only --format='' | sort | uniq -c | sort -nr | head -20 >&2
+	log ""
+}
+
+analyze_project_momentum() {
+	section "5. IS THIS PROJECT ACCELERATING OR DYING"
+	log "Description: Commit count by month (entire history)"
+	log "Signal: Team momentum, attrition events, release patterns"
+	log ""
+	git log --format='%ad' --date=format:'%Y-%m' | sort | uniq -c >&2
+	log ""
+}
+
+analyze_firefighting() {
+	section "6. HOW OFTEN IS THE TEAM FIREFIGHTING"
+	log "Description: Reverts, hotfixes, emergency commits in last year"
+	log "Signal: Deploy fear, testing gaps, rollback friction"
+	log ""
+	git log --oneline --since="1 year ago" | grep -iE 'revert|hotfix|emergency|rollback' >&2 || log "(No firefighting patterns detected)"
+	log ""
+}
+
+main() {
+	git rev-parse --git-dir > /dev/null 2>&1 || die "not a git repository"
+
+	log ""
+	section "GIT CODEBASE ANALYSIS"
+	log ""
+
+	analyze_most_changed
+	analyze_contributors
+	analyze_recent_contributors
+	analyze_bug_clusters
+	analyze_project_momentum
+	analyze_firefighting
+
+	section "Analysis complete!"
+	log ""
+}
+
+main "$@"

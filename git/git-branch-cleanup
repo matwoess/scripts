@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+
+reset=$'\e[0m'
+bold=$'\e[1m'
+red=$'\e[31m'
+green=$'\e[32m'
+cyan=$'\e[36m'
+
+current=$(git branch --show-current)
+
+while read -r branch; do
+	[[ $branch == "$current" ]] && continue
+
+	read -rp "Delete ${cyan}${bold}${branch}${reset}? [y/N] " answer </dev/tty
+	if [[ $answer == [yY] ]]; then
+		if git branch -d "$branch"; then
+			echo "${green}Deleted '$branch'.${reset}"
+		else
+			read -rp "Force-delete ${cyan}${bold}${branch}${reset}? [y/N] " force </dev/tty
+			if [[ $force == [yY] ]]; then
+				if git branch -D "$branch"; then
+					echo "${green}Force-deleted '$branch'.${reset}"
+				else
+					echo "${red}Failed to force-delete '$branch'.${reset}"
+				fi
+			fi
+		fi
+	fi
+done < <(git branch --format='%(refname:short)')

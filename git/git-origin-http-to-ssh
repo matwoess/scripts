@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+#
+# git-origin-http-to-ssh - Replace an HTTP origin remote with SSH.
+#
+# Usage: git-origin-http-to-ssh [options]
+#
+
+set -euo pipefail
+
+readonly SCRIPT_NAME="${0##*/}"
+
+die() {
+	printf '%s: error: %s\n' "$SCRIPT_NAME" "$*" >&2
+	exit 1
+}
+
+log() {
+	printf '%s\n' "$*" >&2
+}
+
+usage() {
+	cat <<EOF
+Usage: $SCRIPT_NAME [options]
+
+Replace an HTTP or HTTPS origin remote with the SSH equivalent, fetch from origin,
+and set the current branch upstream to origin/main or origin/master.
+
+Options:
+	-h, --help      Show this help message
+EOF
+}
+
+extract_http_origin_url() {
+	local remotes=$1
+	local line
+
+	while IFS= read -r line; do
+		if [[ "$line" =~ ^origin[[:space:]]+(https?://[^[:space:]]+)[[:space:]]+\(fetch\)$ ]]; then
+			printf '%s\n' "${BASH_REMATCH[1]}"
+			return 0
+		fi
+	done <<< "$remotes"
+
+	return 1
+}
+
+to_ssh_url() {
+	local http_url="${1/\/\/[^@]*@/\/\/}"
+	local host
+	local path
+	local port
+
+	if [[ "$http_url" =~ ^https?://([^/:]+):([0-9]+)/(.+)$ ]]; then
+		host="${BASH_REMATCH[1]}"
+		port="${BASH_REMATCH[2]}"
+		path="${BASH_REMATCH[3]}"
+		printf 'ssh://git@%s:%s/%s\n' "$host" "$port" "$path"
+		return 0
+	fi
+
+	if [[ "$http_url" =~ ^https?://([^/]+)/(.+)$ ]]; then
+		host="${BASH_REMATCH[1]}"
+		path="${BASH_REMATCH[2]}"
+		printf 'git@%s:%s\n' "$host" "$path"
+		return 0
+	fi
+
+	return 1
+}
+
+detect_upstream_ref() {
+	if git show-ref --verify --quiet refs/remotes/origin/main; then
+		printf '%s\n' 'origin/main'
+		return 0
+	fi
+
+	if git show-ref --verify --quiet refs/remotes/origin/master; then
+		printf '%s\n' 'origin/master'
+		return 0
+	fi
+
+	return 1
+}
+
+main() {
+	local current_branch
+	local origin_url
+	local remotes
+	local ssh_url
+	local upstream_ref
+
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+			-h|--help) usage; exit 0 ;;
+			--) shift; break ;;
+			-*) die "unknown option: $1" ;;
+			*) die "unexpected argument: $1" ;;
+		esac
+		shift
+	done
+
+	git rev-parse --git-dir > /dev/null 2>&1 || die "not a git repository"
+
+	remotes="$(git remote -v)" || die "failed to list remotes"
+	origin_url="$(extract_http_origin_url "$remotes")" || die "origin fetch remote is not HTTP or HTTPS"
+	ssh_url="$(to_ssh_url "$origin_url")" || die "unsupported origin URL: $origin_url"
+
+	log "Found HTTP origin: $origin_url"
+	log "Replacing origin with $ssh_url"
+	git remote remove origin
+	git remote add origin "$ssh_url"
+
+	log "Fetching from origin"
+	git fetch origin
+
+	upstream_ref="$(detect_upstream_ref)" || die "origin/main and origin/master were not found after fetch"
+	current_branch="$(git branch --show-current)" || die "failed to determine current branch"
+	[[ -n "$current_branch" ]] || die "current HEAD is detached"
+
+	log "Setting upstream for $current_branch to $upstream_ref"
+	git branch --set-upstream-to="$upstream_ref" "$current_branch"
+
+	log "Origin now uses SSH."
+}
+
+main "$@"
