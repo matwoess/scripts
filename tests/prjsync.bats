@@ -4,7 +4,7 @@ setup() {
 	TEST_ROOT="$BATS_TEST_TMPDIR/projects"
 	PROJECTS_DIR="$TEST_ROOT"
 	FAKE_BIN="$BATS_TEST_TMPDIR/bin"
-	SCRIPT="$BATS_TEST_DIRNAME/../archive/prjsync"
+	SCRIPT="$BATS_TEST_DIRNAME/../archive/general/prjsync"
 	GIT_LOG="$BATS_TEST_TMPDIR/git.log"
 
 	mkdir -p "$FAKE_BIN" \

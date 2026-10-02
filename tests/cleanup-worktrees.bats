@@ -5,7 +5,7 @@ setup() {
 	PROJECTS_DIR="$TEST_ROOT"
 	WORKTREES_DIR="$PROJECTS_DIR/.worktrees"
 	REPO_DIR="$PROJECTS_DIR/sample-repo"
-	SCRIPT="$BATS_TEST_DIRNAME/../scripts/cleanup-worktrees"
+	SCRIPT="$BATS_TEST_DIRNAME/../git/cleanup-worktrees"
 
 	mkdir -p "$PROJECTS_DIR"
 	git init "$REPO_DIR" >/dev/null
