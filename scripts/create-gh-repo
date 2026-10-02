@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+
+# Use: create-gh-repo [repo-name]
+
+set -euo pipefail
+
+if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+  printf 'Use: %s [repo-name]\n' "${0##*/}"
+  printf 'Creates and pushes a public GitHub repo for the current directory.\n'
+  printf 'Defaults repo-name to the current directory name.\n'
+  exit 0
+fi
+
+repo_name="${1:-${PWD##*/}}"
+blue='\033[34m'
+reset='\033[0m'
+
+if IFS= read -r remote < <(git remote) && [ -n "$remote" ]; then
+  url="$(git remote get-url "$remote")"
+  printf 'Remote %b%s%b already defined as: %b%s%b\n' "$blue" "$remote" "$reset" "$blue" "$url" "$reset"
+  exit 0
+fi
+
+gh repo create "$repo_name" --public --source=. --remote=origin --push

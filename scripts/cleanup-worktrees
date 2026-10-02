@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+#
+# cleanup-worktrees - Remove git worktrees from ~/Projects/.worktrees.
+#
+# Usage: cleanup-worktrees
+#
+
+set -euo pipefail
+
+readonly SCRIPT_NAME="${0##*/}"
+readonly DEFAULT_PROJECTS_DIR="$HOME/Projects"
+readonly PROJECTS_DIR="${PROJECTS_DIR:-$DEFAULT_PROJECTS_DIR}"
+readonly WORKTREES_DIR="${WORKTREES_DIR:-$PROJECTS_DIR/.worktrees}"
+
+die() {
+	printf '%s: error: %s\n' "$SCRIPT_NAME" "$*" >&2
+	exit 1
+}
+
+usage() {
+	cat <<EOF
+Usage: $SCRIPT_NAME
+
+List git worktrees in $WORKTREES_DIR and remove either one or all.
+
+Options:
+	-h, --help      Show this help message
+EOF
+}
+
+list_worktrees() {
+	local -n out_ref=$1
+	local path
+
+	out_ref=()
+
+	[[ -d "$WORKTREES_DIR" ]] || return 0
+
+	while IFS= read -r -d '' path; do
+		out_ref+=("${path##*/}")
+	done < <(find "$WORKTREES_DIR" -mindepth 1 -maxdepth 1 -type d -print0 | sort -z)
+}
+
+show_worktrees() {
+	local -n worktrees_ref=$1
+	local index
+
+	printf 'Worktrees in %s:\n' "$WORKTREES_DIR"
+	for index in "${!worktrees_ref[@]}"; do
+		printf '  %d. %s\n' "$((index + 1))" "${worktrees_ref[index]}"
+	done
+	printf '\n'
+}
+
+select_target() {
+	local -n worktrees_ref=$1
+	local response
+	local selected_index
+
+	printf 'Press Enter to remove all, or enter a number to remove one: ' >&2
+	read -r response
+
+	if [[ -z "$response" ]]; then
+		printf '%s\n' '__all__'
+		return 0
+	fi
+
+	[[ "$response" =~ ^[0-9]+$ ]] || die "invalid worktree number: $response"
+	selected_index=$((response - 1))
+	(( selected_index >= 0 && selected_index < ${#worktrees_ref[@]} )) || die "worktree number out of range: $response"
+
+	printf '%s\n' "${worktrees_ref[selected_index]}"
+}
+
+remove_worktree() {
+	local worktree_name=$1
+	local worktree_path="$WORKTREES_DIR/$worktree_name"
+	local common_git_dir
+	local repo_dir
+
+	[[ -d "$worktree_path" ]] || die "worktree not found: $worktree_path"
+	common_git_dir="$(git -C "$worktree_path" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || die "not a git worktree: $worktree_path"
+	repo_dir="${common_git_dir%/.git}"
+
+	printf 'Removing %s\n' "$worktree_path" >&2
+	git -C "$repo_dir" worktree remove --force "$worktree_path"
+
+	if [[ -e "$worktree_path" ]]; then
+		die "failed to remove worktree: $worktree_path"
+	fi
+}
+
+remove_all_worktrees() {
+	local -n worktrees_ref=$1
+	local worktree_name
+
+	for worktree_name in "${worktrees_ref[@]}"; do
+		remove_worktree "$worktree_name"
+	done
+}
+
+main() {
+	local worktrees=()
+	local target
+
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+			-h|--help) usage; exit 0 ;;
+			--) shift; break ;;
+			-*) die "unknown option: $1" ;;
+			*) die "unexpected argument: $1" ;;
+		esac
+		shift
+	done
+
+	list_worktrees worktrees
+	(( ${#worktrees[@]} > 0 )) || die "no worktrees found in $WORKTREES_DIR"
+
+	show_worktrees worktrees
+	target="$(select_target worktrees)"
+
+	if [[ "$target" == '__all__' ]]; then
+		remove_all_worktrees worktrees
+	else
+		remove_worktree "$target"
+	fi
+
+	printf 'Cleanup complete.\n'
+}
+
+main "$@"
