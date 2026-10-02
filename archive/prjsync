@@ -1,0 +1,217 @@
+#!/usr/bin/env bash
+#
+# prjsync - Update git repositories under ~/Projects.
+#
+# Usage: prjsync
+#
+
+set -Eeuo pipefail
+
+readonly SCRIPT_NAME="${0##*/}"
+readonly DEFAULT_PROJECTS_DIR="$HOME/Projects"
+readonly PROJECTS_DIR="${PROJECTS_DIR:-$DEFAULT_PROJECTS_DIR}"
+
+if [[ -t 1 ]]; then
+	readonly COLOR_INFO=$'\033[1;36m'
+	readonly COLOR_OK=$'\033[1;32m'
+	readonly COLOR_SKIP=$'\033[1;33m'
+	readonly COLOR_FAIL=$'\033[1;31m'
+	readonly COLOR_RESET=$'\033[0m'
+else
+	readonly COLOR_INFO=''
+	readonly COLOR_OK=''
+	readonly COLOR_SKIP=''
+	readonly COLOR_FAIL=''
+	readonly COLOR_RESET=''
+fi
+
+on_error() {
+	local status=$?
+	local line_number=${BASH_LINENO[0]:-unknown}
+	local command=${BASH_COMMAND:-unknown}
+
+	printf '%s: unexpected error at line %s: %s\n' "$SCRIPT_NAME" "$line_number" "$command" >&2
+	exit "$status"
+}
+
+die() {
+	printf '%s: error: %s\n' "$SCRIPT_NAME" "$*" >&2
+	exit 1
+}
+
+usage() {
+	cat <<EOF
+Usage: $SCRIPT_NAME
+
+Update every git repository found under $PROJECTS_DIR, including nested folders
+and repositories inside .personal/.
+
+Environment:
+	PROJECTS_DIR    Root directory to scan for repositories
+
+Options:
+	-h, --help      Show this help message
+EOF
+}
+
+discover_repositories() {
+	local -n out_ref=$1
+	local repo_path
+
+	out_ref=()
+	[[ -d "$PROJECTS_DIR" ]] || die "projects directory not found: $PROJECTS_DIR"
+
+	while IFS= read -r -d '' repo_path; do
+		out_ref+=("$repo_path")
+	done < <(
+		find "$PROJECTS_DIR" -mindepth 1 \
+			\( -type d -name '.git' -printf '%h\0' -prune \) -o \
+			\( -type f -name '.git' -printf '%h\0' \) -o \
+			\( -type d -name '.*' ! -name '.git' ! -name '.personal' -prune \) |
+			LC_ALL=C sort -zu
+	)
+}
+
+has_remote() {
+	local repo_path=$1
+
+	git -C "$repo_path" remote | grep -q .
+}
+
+append_repo() {
+	local -n repos_ref=$1
+	local repo_path=$2
+
+	repos_ref+=("$repo_path")
+}
+
+status_color() {
+	case "$1" in
+		UPDATED) printf '%s' "$COLOR_OK" ;;
+		SKIPPED) printf '%s' "$COLOR_SKIP" ;;
+		FAILED) printf '%s' "$COLOR_FAIL" ;;
+		*) printf '%s' "$COLOR_INFO" ;;
+	esac
+}
+
+print_repo_header() {
+	local index=$1
+	local total=$2
+	local repo_path=$3
+
+	printf '\n%s==>%s [%d/%d] %s\n' \
+		"$COLOR_INFO" "$COLOR_RESET" "$index" "$total" "$repo_path"
+}
+
+print_result() {
+	local status=$1
+	local color
+
+	color="$(status_color "$status")"
+	printf '%sResult:%s [%s%s%s]\n' \
+		"$COLOR_INFO" "$COLOR_RESET" "$color" "$status" "$COLOR_RESET"
+}
+
+print_summary_list() {
+	local label=$1
+	shift
+	local repo_path
+
+	(( $# > 0 )) || return 0
+
+	printf '%s:\n' "$label"
+	for repo_path in "$@"; do
+		printf '  - %s\n' "$repo_path"
+	done
+}
+
+update_repository() {
+	local index=$1
+	local total=$2
+	local repo_path=$3
+	local display_path=${repo_path#"$PROJECTS_DIR"/}
+
+	print_repo_header "$index" "$total" "$display_path"
+
+	if ! has_remote "$repo_path"; then
+		printf '    No remotes configured.\n'
+		print_result 'SKIPPED'
+		return 2
+	fi
+
+	if git -C "$repo_path" pull; then
+		print_result 'UPDATED'
+		return 0
+	fi
+
+	print_result 'FAILED'
+	return 1
+}
+
+main() {
+	local repositories=()
+	local repo_path
+	local display_path
+	local index=0
+	local updated_count=0
+	local skipped_count=0
+	local failed_count=0
+	local update_status
+	local updated_repos=()
+	local skipped_repos=()
+	local failed_repos=()
+
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+			-h|--help) usage; exit 0 ;;
+			--) shift; break ;;
+			-*) die "unknown option: $1" ;;
+			*) die "unexpected argument: $1" ;;
+		esac
+		shift
+	done
+
+	discover_repositories repositories
+	(( ${#repositories[@]} > 0 )) || die "no git repositories found under $PROJECTS_DIR"
+
+	for repo_path in "${repositories[@]}"; do
+		((index += 1))
+		display_path=${repo_path#"$PROJECTS_DIR"/}
+
+		if update_repository "$index" "${#repositories[@]}" "$repo_path"; then
+			((updated_count += 1))
+			append_repo updated_repos "$display_path"
+			continue
+		else
+			update_status=$?
+			if [[ "$update_status" -eq 2 ]]; then
+				((skipped_count += 1))
+				append_repo skipped_repos "$display_path"
+				continue
+			fi
+		fi
+
+		((failed_count += 1))
+		append_repo failed_repos "$display_path"
+	done
+
+	printf '\nSummary: %d updated, %d skipped, %d failed.\n' \
+		"$updated_count" "$skipped_count" "$failed_count"
+	print_summary_list 'Updated' "${updated_repos[@]}"
+	print_summary_list 'Skipped' "${skipped_repos[@]}"
+	print_summary_list 'Failed' "${failed_repos[@]}"
+
+	if (( failed_count == 0 )); then
+		return 0
+	fi
+
+	return 1
+}
+
+trap on_error ERR
+
+if main "$@"; then
+	exit 0
+fi
+
+exit 1
