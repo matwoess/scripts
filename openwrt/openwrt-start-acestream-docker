@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+
+docker run -d --name acestream --restart unless-stopped --net host --memory 300m -e ACESTREAM_EXTRA_FLAGS="--bind-all --live-cache-type memory --live-cache-size 104857600" jopsis/acestream:latest
