@@ -5,7 +5,13 @@ usage() {
 Usage: ${0##*/} [-h] <stream-id|acestream://id> [vlc-options...]
 
 Play an Ace Stream in VLC via the Ace Stream HTTP gateway.
+Scans for Chromecast devices on the local network and casts to the first found device.
 EOF
+}
+
+is_reachable() {
+	local target="$1"
+	ping -c 1 -W 1 "$target" >/dev/null 2>&1
 }
 
 main() {
@@ -34,15 +40,68 @@ main() {
 		exit 1
 	fi
 
-	local ace_host="${ACE_HOST:-openwrt.local}"
+	local ace_host="${ACE_HOST:-192.168.1.1}"
 	local ace_port="${ACE_PORT:-6878}"
 	local stream_url="http://${ace_host}:${ace_port}/ace/getstream?id=${stream_id}"
 
 	printf 'Connecting to Ace Stream gateway at %s:%s\n' "$ace_host" "$ace_port" >&2
 	printf 'Stream ID: %s\n' "$stream_id" >&2
+
+	local cast_args=()
+	local cast_ip=""
+
+	if [[ -n "${CAST_DEVICE:-}" ]]; then
+		if [[ "$CAST_DEVICE" == 'off' || "$CAST_DEVICE" == 'none' ]]; then
+			printf 'Casting disabled by CAST_DEVICE=%s\n' "$CAST_DEVICE" >&2
+		elif cast_ip=$(resolve-host "$CAST_DEVICE" 2>/dev/null); then
+			if is_reachable "$cast_ip"; then
+				printf 'Resolved %s to %s (reachable), casting via VLC\n' "$CAST_DEVICE" "$cast_ip" >&2
+				cast_args=("--sout-chromecast-ip=${cast_ip}")
+			else
+				printf '%s (%s) is not reachable, starting VLC locally\n' "$CAST_DEVICE" "$cast_ip" >&2
+			fi
+		else
+			printf 'Could not resolve hostname "%s" to an IP, starting VLC locally\n' "$CAST_DEVICE" >&2
+		fi
+	else
+		printf 'Scanning for Chromecast devices...\n' >&2
+		local devices=()
+		local line name ip model
+		local first_name="" first_ip=""
+
+		while IFS=$'\t' read -r name ip model; do
+			[[ -z "$ip" ]] && continue
+			if [[ -z "$first_ip" ]]; then
+				first_name="${name:-Chromecast}"
+				first_ip="$ip"
+			fi
+			if [[ -n "$model" ]]; then
+				devices+=("  - ${name:-Chromecast} (${ip}, ${model})")
+			else
+				devices+=("  - ${name:-Chromecast} (${ip})")
+			fi
+		done < <(chromecast-scan 2>/dev/null)
+
+		if (( ${#devices[@]} > 0 )); then
+			printf 'Found %d Chromecast device(s):\n' "${#devices[@]}" >&2
+			for line in "${devices[@]}"; do
+				printf '%s\n' "$line" >&2
+			done
+
+			if is_reachable "$first_ip"; then
+				printf 'Selected "%s" (%s), casting via VLC\n' "$first_name" "$first_ip" >&2
+				cast_args=("--sout-chromecast-ip=${first_ip}")
+			else
+				printf 'Selected device "%s" (%s) is not reachable, starting VLC locally\n' "$first_name" "$first_ip" >&2
+			fi
+		else
+			printf 'No Chromecast devices found, starting VLC locally\n' >&2
+		fi
+	fi
+
 	printf 'Launching VLC: %s\n' "$stream_url" >&2
 
-	exec vlc "$stream_url" "$@"
+	exec vlc "$stream_url" "${cast_args[@]}" "$@"
 }
 
 main "$@"
