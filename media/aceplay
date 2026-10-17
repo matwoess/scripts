@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+
+usage() {
+	cat <<EOF
+Usage: ${0##*/} [-h] <stream-id|acestream://id> [vlc-options...]
+
+Play an Ace Stream in VLC via the Ace Stream HTTP gateway.
+EOF
+}
+
+main() {
+	if [[ $# -eq 0 ]]; then
+		usage >&2
+		exit 1
+	fi
+
+	if [[ "$1" == '-h' || "$1" == '--help' ]]; then
+		usage
+		exit 0
+	fi
+
+	local raw_id="$1"
+	shift
+	local stream_id="${raw_id#acestream://}"
+	stream_id="${stream_id%/}"
+
+	if [[ -z "$stream_id" ]]; then
+		printf '%s: error: stream ID is required\n' "${0##*/}" >&2
+		exit 1
+	fi
+
+	if ! command -v vlc >/dev/null 2>&1; then
+		printf '%s: error: vlc is not installed or not in PATH\n' "${0##*/}" >&2
+		exit 1
+	fi
+
+	local ace_host="${ACE_HOST:-openwrt.local}"
+	local ace_port="${ACE_PORT:-6878}"
+	local stream_url="http://${ace_host}:${ace_port}/ace/getstream?id=${stream_id}"
+
+	printf 'Connecting to Ace Stream gateway at %s:%s\n' "$ace_host" "$ace_port" >&2
+	printf 'Stream ID: %s\n' "$stream_id" >&2
+	printf 'Launching VLC: %s\n' "$stream_url" >&2
+
+	exec vlc "$stream_url" "$@"
+}
+
+main "$@"
