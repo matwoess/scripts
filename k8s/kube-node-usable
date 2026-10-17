@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# Show how much of a resource a pod can still request on a node:
+# allocatable minus what the node's own DaemonSet pods already reserve.
+# Usage: kube-node-usable <node> [cpu|memory]   (resource defaults to cpu)
+set -uo pipefail
+
+usage() { printf 'Usage: %s <node> [cpu|memory]\n' "${0##*/}" >&2; exit 1; }
+
+[[ $# -ge 1 ]] || usage
+node="$1"
+resource="${2:-cpu}"
+
+case "$resource" in
+  cpu | memory) ;;
+  *) printf 'ERROR: resource must be "cpu" or "memory", got "%s"\n' "$resource" >&2; usage ;;
+esac
+
+# ── Node allocatable (also our node-existence check) ──────────────────────────
+allocatable=$(kubectl get node "$node" -o jsonpath="{.status.allocatable.$resource}")
+[[ -n "$allocatable" ]] || { printf 'ERROR: node "%s" not found\n' "$node" >&2; exit 1; }
+
+# ── jq: normalise units, sum DaemonSet requests, subtract from allocatable ────
+# cpu   -> millicores (m), memory -> mebibytes (Mi); both floored for display.
+read -r -d '' jq_prog <<'JQ'
+  def cpu_m($v):
+    if   $v == null                     then 0
+    elif ($v | tostring | test("m$"))   then ($v | tostring | rtrimstr("m") | tonumber)
+    else ($v | tonumber * 1000) end;
+
+  def mem_mib($v):
+    if $v == null then 0 else ($v | tostring) as $s
+      | if   ($s | test("Ki$")) then ($s | rtrimstr("Ki") | tonumber) / 1024
+        elif ($s | test("Mi$")) then ($s | rtrimstr("Mi") | tonumber)
+        elif ($s | test("Gi$")) then ($s | rtrimstr("Gi") | tonumber) * 1024
+        elif ($s | test("Ti$")) then ($s | rtrimstr("Ti") | tonumber) * 1048576
+        else ($s | tonumber) / 1048576 end
+    end;
+
+  def norm($v): if $res == "cpu" then cpu_m($v) else mem_mib($v) end;
+  # cpu: whole millicores; memory: Mi with 2-decimal Gi in parentheses.
+  def fmt($n):  if $res == "cpu" then "\($n | floor)m"
+                else "\($n | floor)Mi (\(($n / 1024 * 100 | round) / 100)Gi)" end;
+
+  [ .items[]
+    | select(any(.metadata.ownerReferences[]?; .kind == "DaemonSet"))
+    | { name: .metadata.name,
+        val:  ([ .spec.containers[].resources.requests[$res]? | norm(.) ] | add // 0) }
+  ] as $ds
+  | ($ds | map(.val) | add // 0) as $sum
+  | norm($alloc) as $alloc_n
+  | ( $ds[] | "\(.name)\t\(fmt(.val))" ),
+    "----\t",
+    "DaemonSet total\t\(fmt($sum))",
+    "allocatable\t\(fmt($alloc_n))",
+    "usable by a pod\t\(fmt($alloc_n - $sum))"
+JQ
+
+# ── Render ────────────────────────────────────────────────────────────────────
+kubectl get pods -A --field-selector "spec.nodeName=$node" -o json \
+  | jq -r --arg alloc "$allocatable" --arg res "$resource" "$jq_prog" \
+  | column -t -s "$(printf '\t')"
