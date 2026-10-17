@@ -1,0 +1,65 @@
+#!/usr/bin/env python
+import argparse
+import sys
+import time
+
+
+def parse_args():
+	parser = argparse.ArgumentParser(
+		description='Scan for Google Cast / Chromecast devices on the local network via mDNS.',
+	)
+	parser.add_argument(
+		'-t',
+		'--timeout',
+		type=float,
+		default=1.2,
+		help='Timeout in seconds to wait for discovery responses (default: 1.2)',
+	)
+	return parser.parse_args()
+
+
+def scan_devices(timeout: float):
+	try:
+		from zeroconf import ServiceBrowser, Zeroconf
+	except ImportError:
+		sys.stderr.write('chromecast-scan: error: python zeroconf module is not installed\n')
+		sys.exit(1)
+
+	devices = []
+
+	class Listener:
+		def add_service(self, zc, type_, name):
+			info = zc.get_service_info(type_, name)
+			if not info or not info.addresses:
+				return
+			ip = '.'.join(str(b) for b in info.addresses[0])
+			fn = info.properties.get(b'fn', b'').decode('utf-8', errors='ignore') or name.split('.')[0]
+			md = info.properties.get(b'md', b'').decode('utf-8', errors='ignore')
+			devices.append((fn, ip, md))
+
+		def update_service(self, zc, type_, name):
+			pass
+
+		def remove_service(self, zc, type_, name):
+			pass
+
+	try:
+		zc = Zeroconf()
+		ServiceBrowser(zc, '_googlecast._tcp.local.', Listener())
+		time.sleep(timeout)
+		zc.close()
+	except Exception as e:
+		sys.stderr.write(f'chromecast-scan: error: {e}\n')
+		sys.exit(1)
+
+	for fn, ip, md in devices:
+		print(f'{fn}\t{ip}\t{md}')
+
+
+def main():
+	args = parse_args()
+	scan_devices(args.timeout)
+
+
+if __name__ == '__main__':
+	main()
