@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+
+usage() {
+	cat <<EOF
+Usage: ${0##*/} [-h] <hostname>
+
+Resolve a hostname to an IP address using NSS and link-local mDNS.
+EOF
+}
+
+resolve() {
+	local host="$1"
+	local entry
+	local ip
+
+	if entry=$(getent ahostsv4 "$host" 2>/dev/null) && [[ -n $entry ]]; then
+		read -r ip _ <<< "$entry"
+		printf '%s\n' "$ip"
+		return 0
+	fi
+
+	if entry=$(getent ahosts "$host" 2>/dev/null) && [[ -n $entry ]]; then
+		read -r ip _ <<< "$entry"
+		printf '%s\n' "$ip"
+		return 0
+	fi
+
+	if [[ "$host" != *.* ]]; then
+		if entry=$(getent ahostsv4 "${host}.local" 2>/dev/null) && [[ -n $entry ]]; then
+			read -r ip _ <<< "$entry"
+			printf '%s\n' "$ip"
+			return 0
+		fi
+		if entry=$(getent ahosts "${host}.local" 2>/dev/null) && [[ -n $entry ]]; then
+			read -r ip _ <<< "$entry"
+			printf '%s\n' "$ip"
+			return 0
+		fi
+	fi
+
+	return 1
+}
+
+main() {
+	if [[ $# -eq 0 ]]; then
+		usage >&2
+		exit 1
+	fi
+
+	if [[ "$1" == '-h' || "$1" == '--help' ]]; then
+		usage
+		exit 0
+	fi
+
+	local host="$1"
+	local ip
+
+	if ip=$(resolve "$host"); then
+		printf '%s\n' "$ip"
+		exit 0
+	fi
+
+	printf '%s: error: could not resolve "%s" to an IP\n' "${0##*/}" "$host" >&2
+	exit 1
+}
+
+main "$@"
