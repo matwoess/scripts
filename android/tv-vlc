@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+if [[ "${1:-}" == '-h' || "${1:-}" == '--help' || $# -lt 1 ]]; then
+	printf 'Usage: %s <path-or-uri>\n' "${0##*/}"
+	printf 'Start VLC on the connected Android TV with the given file path or URI.\n'
+	[[ "${1:-}" == '-h' || "${1:-}" == '--help' ]] && exit 0
+	exit 1
+fi
+
+if ! command -v adb >/dev/null 2>&1; then
+	printf '%s: error: adb is not installed or not in PATH\n' "${0##*/}" >&2
+	exit 1
+fi
+
+target="$1"
+if [[ $target =~ ^[a-zA-Z][a-zA-Z0-9+.-]*:// ]]; then
+	uri="$target"
+else
+	uri="file://$target"
+fi
+
+printf -v quoted_uri '%q' "$uri"
+adb shell am start -a android.intent.action.VIEW -p org.videolan.vlc -t 'video/*' -d "$quoted_uri"
