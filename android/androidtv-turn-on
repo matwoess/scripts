@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+if [[ "${1:-}" == '-h' || "${1:-}" == '--help' ]]; then
+	printf 'Usage: %s [-h] [device-name|IP]\n' "${0##*/}"
+	printf 'Turn on an Android TV via ADB keyevent 224 (KEYCODE_WAKEUP).\n'
+	printf 'Defaults to "Dunja.local".\n'
+	exit 0
+fi
+
+target="${1:-Dunja.local}"
+target_name="${target%.local}"
+ip=''
+
+if [[ $target =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+	ip="$target"
+fi
+
+if [[ -z $ip ]]; then
+	printf 'Scanning for "%s" via chromecast-scan...\n' "$target_name" >&2
+	while IFS=$'\t' read -r name dev_ip _; do
+		if [[ "${name,,}" == "${target_name,,}" && -n $dev_ip ]]; then
+			ip="$dev_ip"
+			break
+		fi
+	done < <(chromecast-scan -t 1.0 2>/dev/null || true)
+fi
+
+if [[ -z $ip ]]; then
+	printf '%s: error: could not resolve "%s" to an IP address\n' "${0##*/}" "$target" >&2
+	exit 1
+fi
+
+if ! command -v adb >/dev/null 2>&1; then
+	printf '%s: error: adb is not installed or not in PATH\n' "${0##*/}" >&2
+	exit 1
+fi
+
+printf 'Connecting to %s (%s:5555)...\n' "$target" "$ip" >&2
+adb connect "$ip:5555" >/dev/null 2>&1 || true
+
+printf 'Sending wakeup key 224 (KEYCODE_WAKEUP)...\n' >&2
+adb -s "$ip:5555" shell input keyevent 224
+
+printf 'Successfully sent wakeup command to %s\n' "$target" >&2
