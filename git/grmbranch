@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+#
+# grmbranch - Delete a local branch (default: current) and switch to the default branch.
+#
+# Merged branches (incl. squash merges) are deleted without prompt,
+# unmerged ones only after confirmation.
+#
+# Usage: grmbranch [branch]
+#
+
+set -o pipefail
+
+die() {
+	echo "${0##*/}: $*" >&2
+	exit 1
+}
+
+# Succeeds if $1 is merged into $2, either directly or as a squash merge.
+is_merged() {
+	local branch=$1 target=$2 base squash
+	git merge-base --is-ancestor "$branch" "$target" && return 0
+	base=$(git merge-base "$target" "$branch") || return 1
+	squash=$(git commit-tree "$branch^{tree}" -p "$base" -m squash) || return 1
+	[[ $(git cherry "$target" "$squash") != +* ]]
+}
+
+main() {
+	local branch default target current answer
+
+	branch=${1:-$(git branch --show-current)} || exit
+	[[ -n $branch ]] || die 'no branch given and HEAD is detached'
+	git show-ref --quiet --verify "refs/heads/$branch" || die "no such branch: $branch"
+
+	default=$(git-default-branch) || exit
+	[[ $branch != "$default" ]] || die "refusing to delete default branch: $default"
+
+	git fetch --quiet --prune origin || die 'fetch failed'
+	target=origin/$default
+	git show-ref --quiet --verify "refs/remotes/$target" || target=$default
+
+	if is_merged "$branch" "$target"; then
+		echo "'$branch' is merged into $target." >&2
+	else
+		read -rp "'$branch' is NOT merged into $target. Delete anyway? [y/N] " answer
+		[[ $answer == [yY] ]] || exit 1
+	fi
+
+	current=$(git branch --show-current)
+	if [[ $current == "$branch" ]]; then
+		git switch --quiet "$default" || exit
+		git pull --quiet --ff-only || echo "warning: pull of $default failed" >&2
+	fi
+
+	git branch -D "$branch"
+}
+
+main "$@"

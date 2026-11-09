@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+#
+# git-default-branch - Print the default branch name of a git repo (e.g. main).
+#
+# Usage: git-default-branch [remote]
+#
+
+remote=${1:-origin}
+
+if ref=$(git symbolic-ref --quiet --short "refs/remotes/$remote/HEAD" 2>/dev/null); then
+	echo "${ref#"$remote"/}"
+	exit 0
+fi
+
+for branch in main master; do
+	if git show-ref --quiet --verify "refs/remotes/$remote/$branch" ||
+		git show-ref --quiet --verify "refs/heads/$branch"; then
+		echo "$branch"
+		exit 0
+	fi
+done
+
+echo "${0##*/}: no default branch found" >&2
+exit 1
