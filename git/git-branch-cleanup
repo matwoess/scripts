@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 #
-# git-branch-cleanup - Interactively delete local branches with merge status check.
+# git-branch-cleanup - Interactively select and delete local branches.
+#
+# Merged branches (incl. squash merges) are pre-selected for deletion.
+# Use Up/Down or j/k to navigate, Space to toggle, Enter to confirm, q/Esc to abort.
 #
 # Usage: git-branch-cleanup
 #
@@ -9,6 +12,7 @@ set -o pipefail
 
 reset=$'\e[0m'
 bold=$'\e[1m'
+dim=$'\e[2m'
 red=$'\e[31m'
 green=$'\e[32m'
 cyan=$'\e[36m'
@@ -27,8 +31,35 @@ is_merged() {
 	[[ $(git cherry "$target" "$squash") != +* ]]
 }
 
+render_menu() {
+	local cursor=$1 count=${#branches[@]} i pointer mark state
+	printf '\e[2K\r%sSpace%s: toggle  %s↑/↓/j/k%s: move  %sEnter%s: delete  %sq/Esc%s: quit\n' \
+		"$bold" "$reset" "$bold" "$reset" "$bold" "$reset" "$bold" "$reset"
+	for ((i = 0; i < count; i++)); do
+		if ((i == cursor)); then
+			pointer="${cyan}>${reset}"
+		else
+			pointer=' '
+		fi
+		if ((selected[i])); then
+			mark="${green}[x]${reset}"
+		else
+			mark='[ ]'
+		fi
+		if ((merged[i])); then
+			state="${green}merged${reset}"
+		else
+			state="${red}unmerged${reset}"
+		fi
+		printf '\e[2K\r%s %s %s%s%s %s(%s)%s\n' \
+			"$pointer" "$mark" "$bold" "${branches[i]}" "$reset" "$dim" "$state" "$reset"
+	done
+}
+
 main() {
-	local current default target branch state answer
+	local current default target branch
+	local branches=() merged=() selected=()
+	local count cursor=0 key rest i deleted=0
 
 	current=$(git branch --show-current) || exit
 	default=$(git-default-branch) || exit
@@ -39,24 +70,76 @@ main() {
 	target=origin/$default
 	git show-ref --quiet --verify "refs/remotes/$target" || target=$default
 
-	while read -r -u 3 branch; do
+	while read -r branch; do
 		[[ $branch == "$current" || $branch == "$default" ]] && continue
-
+		branches+=("$branch")
 		if is_merged "$branch" "$target"; then
-			state="${green}merged${reset}"
+			merged+=(1)
+			selected+=(1)
 		else
-			state="${red}unmerged${reset}"
+			merged+=(0)
+			selected+=(0)
 		fi
+	done < <(git branch --format='%(refname:short)')
 
-		read -rp "Delete ${cyan}${bold}${branch}${reset} ($state)? [y/N] " answer
-		if [[ $answer == [yY] ]]; then
-			if git branch -D "$branch"; then
-				echo "${green}Deleted '$branch'.${reset}"
-			else
-				echo "${red}Failed to delete '$branch'.${reset}" >&2
-			fi
+	count=${#branches[@]}
+	if ((count == 0)); then
+		echo 'No branches to clean up.'
+		exit 0
+	fi
+
+	printf '\e[?25l'
+	trap 'printf "\e[?25h"' EXIT
+
+	render_menu "$cursor"
+	while IFS= read -rsn1 key; do
+		case $key in
+			'')
+				break
+				;;
+			' ')
+				selected[cursor]=$((1 - selected[cursor]))
+				;;
+			j)
+				cursor=$(((cursor + 1) % count))
+				;;
+			k)
+				cursor=$(((cursor - 1 + count) % count))
+				;;
+			q | Q)
+				echo 'Aborted.'
+				exit 0
+				;;
+			$'\e')
+				IFS= read -rsn2 -t 0.05 rest || true
+				case $rest in
+					'[A') cursor=$(((cursor - 1 + count) % count)) ;;
+					'[B') cursor=$(((cursor + 1) % count)) ;;
+					'')
+						echo 'Aborted.'
+						exit 0
+						;;
+				esac
+				;;
+		esac
+		printf '\e[%dA' "$((count + 1))"
+		render_menu "$cursor"
+	done
+
+	for ((i = 0; i < count; i++)); do
+		((selected[i])) || continue
+		branch=${branches[i]}
+		if git branch -D "$branch"; then
+			echo "${green}Deleted '$branch'.${reset}"
+			((deleted++))
+		else
+			echo "${red}Failed to delete '$branch'.${reset}" >&2
 		fi
-	done 3< <(git branch --format='%(refname:short)')
+	done
+
+	if ((deleted == 0)); then
+		echo 'No branches deleted.'
+	fi
 }
 
 main "$@"
