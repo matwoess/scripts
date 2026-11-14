@@ -1,4 +1,11 @@
 #!/usr/bin/env bash
+#
+# git-branch-cleanup - Interactively delete local branches with merge status check.
+#
+# Usage: git-branch-cleanup
+#
+
+set -o pipefail
 
 reset=$'\e[0m'
 bold=$'\e[1m'
@@ -6,24 +13,50 @@ red=$'\e[31m'
 green=$'\e[32m'
 cyan=$'\e[36m'
 
-current=$(git branch --show-current)
+die() {
+	echo "${0##*/}: $*" >&2
+	exit 1
+}
 
-while read -r branch; do
-	[[ $branch == "$current" ]] && continue
+# Succeeds if $1 is merged into $2, either directly or as a squash merge.
+is_merged() {
+	local branch=$1 target=$2 base squash
+	git merge-base --is-ancestor "$branch" "$target" && return 0
+	base=$(git merge-base "$target" "$branch") || return 1
+	squash=$(git commit-tree "$branch^{tree}" -p "$base" -m squash) || return 1
+	[[ $(git cherry "$target" "$squash") != +* ]]
+}
 
-	read -rp "Delete ${cyan}${bold}${branch}${reset}? [y/N] " answer </dev/tty
-	if [[ $answer == [yY] ]]; then
-		if git branch -d "$branch"; then
-			echo "${green}Deleted '$branch'.${reset}"
+main() {
+	local current default target branch state answer
+
+	current=$(git branch --show-current) || exit
+	default=$(git-default-branch) || exit
+
+	if git remote get-url origin &>/dev/null; then
+		git fetch --quiet --prune origin || die 'fetch failed'
+	fi
+	target=origin/$default
+	git show-ref --quiet --verify "refs/remotes/$target" || target=$default
+
+	while read -r -u 3 branch; do
+		[[ $branch == "$current" || $branch == "$default" ]] && continue
+
+		if is_merged "$branch" "$target"; then
+			state="${green}merged${reset}"
 		else
-			read -rp "Force-delete ${cyan}${bold}${branch}${reset}? [y/N] " force </dev/tty
-			if [[ $force == [yY] ]]; then
-				if git branch -D "$branch"; then
-					echo "${green}Force-deleted '$branch'.${reset}"
-				else
-					echo "${red}Failed to force-delete '$branch'.${reset}"
-				fi
+			state="${red}unmerged${reset}"
+		fi
+
+		read -rp "Delete ${cyan}${bold}${branch}${reset} ($state)? [y/N] " answer
+		if [[ $answer == [yY] ]]; then
+			if git branch -D "$branch"; then
+				echo "${green}Deleted '$branch'.${reset}"
+			else
+				echo "${red}Failed to delete '$branch'.${reset}" >&2
 			fi
 		fi
-	fi
-done < <(git branch --format='%(refname:short)')
+	done 3< <(git branch --format='%(refname:short)')
+}
+
+main "$@"
