@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# Checks a GitHub Personal Access Token (PAT) from a file against the GitHub API.
+
+set -euo pipefail
+
+if [[ $# -ne 1 ]]; then
+	echo "Usage: ${0##*/} <token-file>" >&2
+	exit 1
+fi
+
+token_file=$1
+if [[ ! -f $token_file ]]; then
+	echo "Error: file not found: $token_file" >&2
+	exit 1
+fi
+
+token=$(tr -d '[:space:]' < "$token_file")
+if [[ -z $token ]]; then
+	echo "Error: token file is empty: $token_file" >&2
+	exit 1
+fi
+
+response=$(curl -sSi \
+	-H "Authorization: Bearer $token" \
+	-H "Accept: application/vnd.github+json" \
+	https://api.github.com/user)
+
+headers=${response%%$'\r\n\r\n'*}
+body=${response#*$'\r\n\r\n'}
+
+status_line=$(head -n1 <<< "$headers" | tr -d '\r')
+scopes=$(grep -i '^x-oauth-scopes:' <<< "$headers" | cut -d: -f2- | tr -d '\r' | sed 's/^ *//' || true)
+expiration=$(grep -i '^github-authentication-token-expiration:' <<< "$headers" | cut -d: -f2- | tr -d '\r' | sed 's/^ *//' || true)
+
+echo "Status:     $status_line"
+
+if command -v jq >/dev/null 2>&1; then
+	login=$(jq -r '.login // empty' <<< "$body")
+	message=$(jq -r '.message // empty' <<< "$body")
+else
+	login=$(grep -o '"login": *"[^"]*"' <<< "$body" | head -n1 | cut -d'"' -f4 || true)
+	message=$(grep -o '"message": *"[^"]*"' <<< "$body" | head -n1 | cut -d'"' -f4 || true)
+fi
+
+if [[ -n $login ]]; then
+	echo "Account:    $login"
+	echo "Scopes:     ${scopes:-<none or fine-grained token>}"
+	[[ -n $expiration ]] && echo "Expires:    $expiration"
+else
+	echo "Error:      ${message:-Authentication failed}" >&2
+	exit 1
+fi
