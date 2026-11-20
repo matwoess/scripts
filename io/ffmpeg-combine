@@ -1,35 +1,161 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 
-help () {
-  echo "usage: $(basename "$0") <file1> <file2> <delay>"
-  echo "  where:"
-  echo "    file1 - the video source file"
-  echo "    file2 - the audio source file"
-  echo "    delay - [optional] the audio delay in seconds (negative value for audio to be earlier than video)"
+prog=${0##*/}
+
+usage() {
+	cat <<EOF
+Usage: $prog [options] <file1> <file2> [output]
+
+Append an audio stream from <file2> to <file1> without re-encoding.
+
+Arguments:
+  file1              Base video file (all streams are kept)
+  file2              Audio source file
+  output             Output file (default: <file1>-combined.<ext>)
+
+Options:
+  -d, --delay <sec>  Audio delay in seconds for file2 (negative = earlier, default: 0)
+  -a, --audio <spec> Audio stream from file2: 0-based index, 'all', or title/lang match (default: 0)
+  -h, --help         Show this help
+EOF
 }
 
-case $1 in
-  -h | --help) help ; exit 1 ;;
-esac
+die() {
+	printf '%s: %s\n' "$prog" "$*" >&2
+	exit 1
+}
 
-# exit if not enough arguments
-if [[ $# -lt 2 ]] ; then
-    echo "$(basename "$0"): missing arguments, see -h or --help for usage help"
-    exit 1
-fi
+default_output() {
+	local file=$1
+	local dir=${file%/*}
+	local base=${file##*/}
+	local stem ext
 
-file1=$1
-file2=$2
+	if [[ $base == ?*.* ]]; then
+		stem=${base%.*}
+		ext=.${base##*.}
+	else
+		stem=$base
+		ext=
+	fi
 
-if [[ -z $3 ]] ; then
-  delay=0
-else
- delay=$3
-fi
+	if [[ $file == */* ]]; then
+		printf '%s/%s-combined%s\n' "$dir" "$stem" "$ext"
+	else
+		printf '%s-combined%s\n' "$stem" "$ext"
+	fi
+}
 
-echo ":: putting video of <file1> together with audio of <file2> with delay $delay"
-echo ":: starting..."
+resolve_audio_map() {
+	local file=$1
+	local spec=$2
 
-ffmpeg -i $file1 -itsoffset $delay -i $file2 -c copy -map 0:v:0 -map 1:a:0 -ac 2 out.mp4
+	if [[ $spec == 'all' ]]; then
+		printf '1:a\n'
+		return 0
+	fi
 
-echo "[  DONE  ]"
+	if [[ $spec =~ ^[0-9]+$ ]]; then
+		printf '1:a:%s\n' "$spec"
+		return 0
+	fi
+
+	local query=${spec,,}
+	local line idx rest
+	while IFS= read -r line; do
+		idx=${line%%,*}
+		rest=
+		if [[ $line == *,* ]]; then
+			rest=${line#*,}
+		fi
+		if [[ ${rest,,} == *"$query"* ]]; then
+			printf '1:%s\n' "$idx"
+			return 0
+		fi
+	done < <(ffprobe -v error -select_streams a \
+		-show_entries stream=index:stream_tags=language,title \
+		-of csv=p=0 "$file")
+
+	printf '%s: no audio stream matching "%s" in %s\n' "$prog" "$spec" "$file" >&2
+	printf 'Available audio streams:\n' >&2
+	ffprobe -v error -select_streams a \
+		-show_entries stream=index:stream_tags=language,title \
+		-of csv=p=0 "$file" >&2
+	return 1
+}
+
+main() {
+	if (($# == 0)); then
+		usage
+		exit 1
+	fi
+
+	local delay=0
+	local audio=0
+	local -a positional=()
+
+	while (($# > 0)); do
+		case $1 in
+			-h|--help)
+				usage
+				exit 0
+				;;
+			-d|--delay)
+				(($# >= 2)) || die "missing value for $1"
+				delay=$2
+				shift 2
+				;;
+			--delay=*)
+				delay=${1#*=}
+				shift
+				;;
+			-a|--audio)
+				(($# >= 2)) || die "missing value for $1"
+				audio=$2
+				shift 2
+				;;
+			--audio=*)
+				audio=${1#*=}
+				shift
+				;;
+			--)
+				shift
+				positional+=("$@")
+				break
+				;;
+			-*)
+				die "unknown option: $1 (see --help)"
+				;;
+			*)
+				positional+=("$1")
+				shift
+				;;
+		esac
+	done
+
+	((${#positional[@]} >= 2 && ${#positional[@]} <= 3)) || die "expected 2 or 3 arguments (see --help)"
+
+	local file1=${positional[0]}
+	local file2=${positional[1]}
+	local output=${positional[2]:-$(default_output "$file1")}
+
+	[[ -f $file1 ]] || die "file not found: $file1"
+	[[ -f $file2 ]] || die "file not found: $file2"
+
+	local audio_map
+	audio_map=$(resolve_audio_map "$file2" "$audio")
+
+	local -a ffmpeg_args=(-i "$file1")
+	if [[ $delay != '0' ]]; then
+		ffmpeg_args+=(-itsoffset "$delay")
+	fi
+	ffmpeg_args+=(-i "$file2" -map 0 -map "$audio_map" -c copy "$output")
+
+	printf ':: appending audio (%s, delay %ss) from %s to %s -> %s\n' \
+		"$audio_map" "$delay" "$file2" "$file1" "$output" >&2
+
+	ffmpeg "${ffmpeg_args[@]}"
+}
+
+main "$@"
