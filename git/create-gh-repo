@@ -6,7 +6,7 @@ set -euo pipefail
 
 if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
   printf 'Use: %s [repo-name]\n' "${0##*/}"
-  printf 'Creates and pushes a public GitHub repo for the current directory.\n'
+  printf 'Creates and pushes a private GitHub repo for the current directory.\n'
   printf 'Defaults repo-name to the current directory name.\n'
   exit 0
 fi
@@ -21,4 +21,4 @@ if IFS= read -r remote < <(git remote) && [ -n "$remote" ]; then
   exit 0
 fi
 
-gh repo create "$repo_name" --public --source=. --remote=origin --push
+gh repo create "$repo_name" --private --source=. --remote=origin --push
