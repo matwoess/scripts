@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 #
-# cleanup-worktrees - Remove git worktrees from ~/Projects/.worktrees.
+# worktrees-cleanup - Remove git worktrees from ~/Projects/.worktrees.
 #
 # All worktrees are pre-selected for removal.
 # Use Up/Down or j/k to navigate, Space to toggle, Enter to confirm, q/Esc to abort.
 #
-# Usage: cleanup-worktrees
+# Usage: worktrees-cleanup
 #
 
 set -euo pipefail
