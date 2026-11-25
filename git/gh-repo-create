@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Use: create-gh-repo [repo-name]
+# Use: gh-repo-create [repo-name]
 
 set -euo pipefail
 
