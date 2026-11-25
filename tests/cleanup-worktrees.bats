@@ -24,10 +24,10 @@ setup() {
 @test 'removes a single selected worktree' {
 	printf 'dirty\n' >> "$WORKTREES_DIR/feature-a/file.txt"
 
-	run bash -c "printf '1\n' | PROJECTS_DIR='$PROJECTS_DIR' WORKTREES_DIR='$WORKTREES_DIR' '$SCRIPT'"
+	run bash -c "printf 'j \n' | PROJECTS_DIR='$PROJECTS_DIR' WORKTREES_DIR='$WORKTREES_DIR' '$SCRIPT'"
 
 	[[ "$status" -eq 0 ]]
-	[[ "$output" == *'Cleanup complete.'* ]]
+	[[ "$output" == *'Removed feature-a.'* ]]
 	[[ ! -d "$WORKTREES_DIR/feature-a" ]]
 	[[ -d "$WORKTREES_DIR/feature-b" ]]
 }
@@ -39,7 +39,15 @@ setup() {
 	run bash -c "printf '\n' | PROJECTS_DIR='$PROJECTS_DIR' WORKTREES_DIR='$WORKTREES_DIR' '$SCRIPT'"
 
 	[[ "$status" -eq 0 ]]
-	[[ "$output" == *'Cleanup complete.'* ]]
+	[[ "$output" == *'Removed feature-a.'* ]]
 	[[ ! -d "$WORKTREES_DIR/feature-a" ]]
 	[[ ! -d "$WORKTREES_DIR/feature-b" ]]
+}
+
+@test 'aborts on q without removing' {
+	run bash -c "printf 'q' | PROJECTS_DIR='$PROJECTS_DIR' WORKTREES_DIR='$WORKTREES_DIR' '$SCRIPT'"
+
+	[[ "$status" -eq 0 ]]
+	[[ "$output" == *'Aborted.'* ]]
+	[[ -d "$WORKTREES_DIR/feature-a" ]]
 }

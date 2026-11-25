@@ -2,6 +2,9 @@
 #
 # cleanup-worktrees - Remove git worktrees from ~/Projects/.worktrees.
 #
+# All worktrees are pre-selected for removal.
+# Use Up/Down or j/k to navigate, Space to toggle, Enter to confirm, q/Esc to abort.
+#
 # Usage: cleanup-worktrees
 #
 
@@ -12,6 +15,13 @@ readonly DEFAULT_PROJECTS_DIR="$HOME/Projects"
 readonly PROJECTS_DIR="${PROJECTS_DIR:-$DEFAULT_PROJECTS_DIR}"
 readonly WORKTREES_DIR="${WORKTREES_DIR:-$PROJECTS_DIR/.worktrees}"
 
+reset=$'\e[0m'
+bold=$'\e[1m'
+dim=$'\e[2m'
+red=$'\e[31m'
+green=$'\e[32m'
+cyan=$'\e[36m'
+
 die() {
 	printf '%s: error: %s\n' "$SCRIPT_NAME" "$*" >&2
 	exit 1
@@ -21,7 +31,7 @@ usage() {
 	cat <<EOF
 Usage: $SCRIPT_NAME
 
-List git worktrees in $WORKTREES_DIR and remove either one or all.
+Interactively select git worktrees in $WORKTREES_DIR to remove.
 
 Options:
 	-h, --help      Show this help message
@@ -41,35 +51,49 @@ list_worktrees() {
 	done < <(find "$WORKTREES_DIR" -mindepth 1 -maxdepth 1 -type d -print0 | sort -z)
 }
 
-show_worktrees() {
-	local -n worktrees_ref=$1
-	local index
-
-	printf 'Worktrees in %s:\n' "$WORKTREES_DIR"
-	for index in "${!worktrees_ref[@]}"; do
-		printf '  %d. %s\n' "$((index + 1))" "${worktrees_ref[index]}"
+render_menu() {
+	local cursor=$1 count=${#worktrees[@]} i pointer mark state
+	printf '\e[2K\r%sSpace%s: toggle  %s↑/↓/j/k%s: move  %sEnter%s: remove  %sq/Esc%s: quit\n' \
+		"$bold" "$reset" "$bold" "$reset" "$bold" "$reset" "$bold" "$reset"
+	for ((i = 0; i < count; i++)); do
+		pointer=' '
+		((i == cursor)) && pointer="${cyan}>${reset}"
+		mark='[ ]'
+		((selected[i])) && mark="${green}[x]${reset}"
+		state="${green}clean${reset}"
+		((dirty[i])) && state="${red}dirty${reset}"
+		printf '\e[2K\r%s %s %s%s%s %s(%s)%s\n' \
+			"$pointer" "$mark" "$bold" "${worktrees[i]}" "$reset" "$dim" "$state" "$reset"
 	done
-	printf '\n'
 }
 
-select_target() {
-	local -n worktrees_ref=$1
-	local response
-	local selected_index
+# Lets the user toggle worktrees in `selected`; returns 1 on abort.
+select_worktrees() {
+	local count=${#worktrees[@]} cursor=0 key rest
 
-	printf 'Press Enter to remove all, or enter a number to remove one: ' >&2
-	read -r response
+	printf '\e[?25l'
+	trap 'printf "\e[?25h"' EXIT
 
-	if [[ -z "$response" ]]; then
-		printf '%s\n' '__all__'
-		return 0
-	fi
-
-	[[ "$response" =~ ^[0-9]+$ ]] || die "invalid worktree number: $response"
-	selected_index=$((response - 1))
-	(( selected_index >= 0 && selected_index < ${#worktrees_ref[@]} )) || die "worktree number out of range: $response"
-
-	printf '%s\n' "${worktrees_ref[selected_index]}"
+	render_menu "$cursor"
+	while IFS= read -rsn1 key; do
+		case $key in
+			'') return 0 ;;
+			' ') selected[cursor]=$((1 - selected[cursor])) ;;
+			j) cursor=$(((cursor + 1) % count)) ;;
+			k) cursor=$(((cursor - 1 + count) % count)) ;;
+			q | Q) return 1 ;;
+			$'\e')
+				IFS= read -rsn2 -t 0.05 rest || true
+				case $rest in
+					'[A') cursor=$(((cursor - 1 + count) % count)) ;;
+					'[B') cursor=$(((cursor + 1) % count)) ;;
+					'') return 1 ;;
+				esac
+				;;
+		esac
+		printf '\e[%dA' "$((count + 1))"
+		render_menu "$cursor"
+	done
 }
 
 remove_worktree() {
@@ -82,26 +106,14 @@ remove_worktree() {
 	common_git_dir="$(git -C "$worktree_path" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || die "not a git worktree: $worktree_path"
 	repo_dir="${common_git_dir%/.git}"
 
-	printf 'Removing %s\n' "$worktree_path" >&2
-	git -C "$repo_dir" worktree remove --force "$worktree_path"
-
-	if [[ -e "$worktree_path" ]]; then
-		die "failed to remove worktree: $worktree_path"
-	fi
-}
-
-remove_all_worktrees() {
-	local -n worktrees_ref=$1
-	local worktree_name
-
-	for worktree_name in "${worktrees_ref[@]}"; do
-		remove_worktree "$worktree_name"
-	done
+	git -C "$repo_dir" worktree remove --force "$worktree_path" && [[ ! -e "$worktree_path" ]] \
+		|| { printf '%sFailed to remove %s.%s\n' "$red" "$worktree_name" "$reset" >&2; return 1; }
+	printf '%sRemoved %s.%s\n' "$green" "$worktree_name" "$reset"
 }
 
 main() {
-	local worktrees=()
-	local target
+	local worktrees=() selected=() dirty=()
+	local i removed=0
 
 	while [[ $# -gt 0 ]]; do
 		case "$1" in
@@ -116,16 +128,23 @@ main() {
 	list_worktrees worktrees
 	(( ${#worktrees[@]} > 0 )) || die "no worktrees found in $WORKTREES_DIR"
 
-	show_worktrees worktrees
-	target="$(select_target worktrees)"
+	for i in "${!worktrees[@]}"; do
+		selected+=(1)
+		if [[ -n "$(git -C "$WORKTREES_DIR/${worktrees[i]}" status --porcelain 2>/dev/null)" ]]; then
+			dirty+=(1)
+		else
+			dirty+=(0)
+		fi
+	done
 
-	if [[ "$target" == '__all__' ]]; then
-		remove_all_worktrees worktrees
-	else
-		remove_worktree "$target"
-	fi
+	select_worktrees || { printf 'Aborted.\n'; exit 0; }
 
-	printf 'Cleanup complete.\n'
+	for i in "${!worktrees[@]}"; do
+		((selected[i])) || continue
+		remove_worktree "${worktrees[i]}" && removed=$((removed + 1))
+	done
+
+	((removed > 0)) || printf 'No worktrees removed.\n'
 }
 
 main "$@"
